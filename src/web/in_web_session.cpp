@@ -206,8 +206,8 @@ namespace main_player::logic::connection
         {
             try
             {
-                boost::beast::error_code ec_cancel;
-                _ws->cancel(ec_cancel);
+                boost::system::error_code ec_cancel;
+                _ws->next_layer().cancel(ec_cancel);
 
                 boost::beast::error_code ec;
                 if (_ws->is_open())
