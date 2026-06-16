@@ -8,6 +8,10 @@
 
 namespace main_player::server::http
 {
+	using logger = main_player::core::debug::debug_system;
+	using str = std::string;
+	using s_t = std::size_t;
+
 	void session_get::cleanup()
 	{
 		if(_req)
@@ -53,32 +57,32 @@ namespace main_player::server::http
 
 			std::cout << "Received " << _req->method_string() << " " << _req->target() << std::endl;
 
-			std::string target = _req->target();
-			std::string query_string;
+			str target = _req->target();
+			str query_string;
 
-			std::size_t query_pos = target.find('?');
+			s_t query_pos = target.find('?');
 
-			if(query_pos != std::string::npos) query_string = target.substr(query_pos + 1);
+			if(query_pos != str::npos) query_string = target.substr(query_pos + 1);
 			else query_string = "";
 
-			main_player::core::debug::debug_system::log("session_get", "GET request: " + target);
+			logger::log("session_get", "GET request: " + target);
 
-			std::string result = _on_request(query_string);
+			str result = _on_request(query_string);
 
 			auto response = create_response(boost::beast::http::status::ok, result);
 
 			response.set(boost::beast::http::field::content_type, "application/json");
 
-			main_player::core::debug::debug_system::log_green("session_get", "GET response: " + result);
+			logger::log("session_get", "GET response: " + result);
 
 			send_response(std::move(response));
 		}
 		catch(const std::exception& e)
 		{
-			main_player::core::debug::debug_system::error("session_get", "GET error: " + std::string(e.what()));
+			logger::error("session_get", "GET error: " + str(e.what()));
 
 			send_response(create_response(boost::beast::http::status::bad_request,
-			                              "Error processing GET request: " + std::string(e.what())));
+			                              "Error processing GET request: " + str(e.what())));
 		}
 	}
 
@@ -88,14 +92,14 @@ namespace main_player::server::http
 		_buffer = new boost::beast::flat_buffer(8192);
 		_is_reading = true;
 
-		async_read(*_socket, *_buffer, *_req, [this](boost::beast::error_code ec, std::size_t bytes_transferred)
+		async_read(*_socket, *_buffer, *_req, [this](boost::beast::error_code ec, s_t bytes_transferred)
 		{
 			if(!ec && bytes_transferred > 0) process_request();
 			else cleanup();
 		});
 	}
 
-	boost::beast::http::response<boost::beast::http::string_body> session_get::create_response(boost::beast::http::status status, const std::string& body)
+	boost::beast::http::response<boost::beast::http::string_body> session_get::create_response(boost::beast::http::status status, const str& body)
 	{
 		if(!_req) return boost::beast::http::response<boost::beast::http::string_body>{status, 11};
 
@@ -114,7 +118,7 @@ namespace main_player::server::http
 	{
 		_res = new boost::beast::http::response<boost::beast::http::string_body>(std::move(response));
 
-		boost::beast::http::async_write(*_socket, *_res, [this](boost::beast::error_code ec, std::size_t)
+		boost::beast::http::async_write(*_socket, *_res, [this](boost::beast::error_code ec, s_t)
 		{
 			if(!ec)
 			{
@@ -126,7 +130,7 @@ namespace main_player::server::http
 	}
 
 	//Public:
-	session_get::session_get(boost::asio::ip::tcp::socket* socket, std::function<std::string(const std::string&)> on_request)
+	session_get::session_get(boost::asio::ip::tcp::socket* socket, std::function<str(const str&)> on_request)
 	{
 		_socket = new boost::asio::ip::tcp::socket(std::move(*socket));
 		_on_request = std::move(on_request);

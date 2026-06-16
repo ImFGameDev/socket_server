@@ -1,6 +1,8 @@
 #ifndef IN_SESSION_WEB_H
 #define IN_SESSION_WEB_H
 
+#include <atomic>
+#include <deque>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/websocket.hpp>
 #include <sessions/i_session.h>
@@ -11,16 +13,16 @@ namespace main_player::logic::connection
 	class in_web_session : public i_session
 	{
 	private:
-		std::vector<std::tuple<std::uint8_t, std::string, std::function<void(bool)>>> _write_queue;
+		std::deque<std::tuple<std::uint8_t, std::string, std::function<void(bool)>>> _write_queue;
 		main_player::core::actions::hash_events_getter<std::uint8_t, const std::string&>* _event;
 		boost::beast::websocket::stream<boost::asio::ip::tcp::socket>* _ws;
 		std::function<void()> _close_callback;
+		std::mutex _callback_mutex;
 		std::mutex _write_mutex;
-		std::uint16_t _buffer_size;
 		float _time_wait_ping;
 		std::atomic<bool> _is_closing;
 		bool _is_writing;
-		bool _is_run;
+		std::atomic<bool> _is_run;
 
 		void process_write_queue();
 
@@ -31,6 +33,11 @@ namespace main_player::logic::connection
 		void close();
 
 	public:
+		in_web_session(const in_web_session&) = delete;
+		in_web_session& operator=(const in_web_session&) = delete;
+		in_web_session(in_web_session&&) = delete;
+		in_web_session& operator=(in_web_session&&) = delete;
+
 		explicit in_web_session(boost::asio::ip::tcp::socket* socket);
 
 		~in_web_session() override;

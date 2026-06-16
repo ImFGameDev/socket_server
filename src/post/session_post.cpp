@@ -8,6 +8,10 @@
 
 namespace main_player::server::http
 {
+	using logger = main_player::core::debug::debug_system;
+	using str = std::string;
+	using s_t = std::size_t;
+
 	void session_post::cleanup()
 	{
 		if(_req)
@@ -53,21 +57,21 @@ namespace main_player::server::http
 
 		try
 		{
-			const std::string& body = _req->body();
+			const str& body = _req->body();
 
-			main_player::core::debug::debug_system::log_green("session_post", "POST data: " + body);
+			logger::log("session_post", "POST data: " + body);
 
-			std::string result = _on_request(body);
+			str result = _on_request(body);
 
 			auto response = create_response(boost::beast::http::status::ok, result);
 
-			main_player::core::debug::debug_system::log_green("session_post", "POST response: " + result);
+			logger::log("session_post", "POST response: " + result);
 
 			send_response(std::move(response));
 		}
 		catch(const std::exception& e)
 		{
-			main_player::core::debug::debug_system::error("session_post", "POST error: " + std::string(e.what()));
+			logger::error("session_post", "POST error: " + str(e.what()));
 			send_response(create_response(boost::beast::http::status::bad_request, "Error processing request"));
 		}
 	}
@@ -78,14 +82,14 @@ namespace main_player::server::http
 		_buffer = new boost::beast::flat_buffer(8192);
 		_is_reading = true;
 
-		async_read(*_socket, *_buffer, *_req, [this](boost::beast::error_code ec, std::size_t bytes_transferred)
+		async_read(*_socket, *_buffer, *_req, [this](boost::beast::error_code ec, s_t bytes_transferred)
 		{
 			if(!ec && bytes_transferred > 0) process_request();
 			else cleanup();
 		});
 	}
 
-	boost::beast::http::response<boost::beast::http::string_body> session_post::create_response(boost::beast::http::status status, const std::string& body)
+	boost::beast::http::response<boost::beast::http::string_body> session_post::create_response(boost::beast::http::status status, const str& body)
 	{
 		if(!_req) return boost::beast::http::response<boost::beast::http::string_body>{status, 11};
 
@@ -104,7 +108,7 @@ namespace main_player::server::http
 	{
 		_res = new boost::beast::http::response<boost::beast::http::string_body>(std::move(response));
 
-		boost::beast::http::async_write(*_socket, *_res, [this](boost::beast::error_code ec, std::size_t)
+		boost::beast::http::async_write(*_socket, *_res, [this](boost::beast::error_code ec, s_t)
 		{
 			if(!ec)
 			{
@@ -116,7 +120,7 @@ namespace main_player::server::http
 	}
 
 	//Public:
-	session_post::session_post(boost::asio::ip::tcp::socket* socket, std::function<std::string(const std::string&)> on_request)
+	session_post::session_post(boost::asio::ip::tcp::socket* socket, std::function<str(const str&)> on_request)
 	{
 		_socket = new boost::asio::ip::tcp::socket(std::move(*socket));
 		_on_request = std::move(on_request);

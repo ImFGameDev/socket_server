@@ -8,259 +8,267 @@
 
 namespace main_player::logic::connection
 {
-	const int _ping_pong = 30;
+    using logger = main_player::core::debug::debug_system;
+    using str = std::string;
+    using u8 = std::uint8_t;
+    using s_t = std::size_t;
 
-	void in_web_session::read_message()
-	{
-		if (!_ws->is_open() || _is_closing)
-		{
-			close();
-			return;
-		}
+    constexpr int _ping_pong_timeout = 30;
 
-		auto buffer = std::make_shared<boost::beast::flat_buffer>();
+    void in_web_session::read_message()
+    {
+        if (!_ws->is_open() || _is_closing)
+        {
+            close();
+            return;
+        }
 
-		_ws->async_read(*buffer, [this, buffer](boost::beast::error_code ec, std::size_t bytes_transferred)
-		{
-			if (ec)
-			{
-				if (ec != boost::beast::websocket::error::closed)
-					main_player::core::debug::debug_system::error("web_session",
-					                                              "WebSocket read failed: " + ec.message());
+        auto buffer = std::make_shared<boost::beast::flat_buffer>();
 
-				close();
-				return;
-			}
+        _ws->async_read(*buffer, [this, buffer](boost::beast::error_code ec, s_t bytes_transferred)
+        {
+            if (ec)
+            {
+                if (ec != boost::beast::websocket::error::closed)
+                    logger::error("web_session", "WebSocket read failed: " + ec.message());
 
-			try
-			{
-				auto data = buffer->data();
-				std::string message(static_cast<const char*>(data.data()), data.size());
+                close();
+                return;
+            }
 
-				if (message.length() < 1)
-				{
-					main_player::core::debug::debug_system::error("web_session", "Empty WebSocket message");
-					close();
-					return;
-				}
+            try
+            {
+                auto data = buffer->data();
+                str message(static_cast<const char *>(data.data()), data.size());
 
-				std::uint8_t tag = static_cast<std::uint8_t>(message[0]);
-				std::string json_data = message.substr(1);
-				std::string log = "read: " + std::to_string(tag) + '/' + json_data;
+                if (message.length() < 1)
+                {
+                    logger::error("web_session", "Empty WebSocket message");
+                    close();
+                    return;
+                }
 
-				main_player::core::debug::debug_system::log("web_session", log);
+                auto tag = static_cast<u8>(message[0]);
+                str json_data = message.substr(1);
+                str log = "read: " + std::to_string(tag) + '/' + json_data;
 
-				_event->invoke(tag, json_data);
+                logger::log("web_session", log);
 
-				read_message();
-			}
-			catch (const std::exception& e)
-			{
-				main_player::core::debug::debug_system::error("web_session",
-				                                              "Message processing error: " + std::string(e.what()));
-				close();
-			}
-		});
-	}
+                _event->invoke(tag, json_data);
 
-	void in_web_session::process_write_queue()
-	{
-		if (_write_queue.empty() || _is_closing || !_ws->is_open())
-		{
-			_is_writing = false;
-			return;
-		}
+                read_message();
+            } catch (const std::exception &e)
+            {
+                logger::error("web_session",
+                              "Message processing error: " + str(e.what()));
+                close();
+            }
+        });
+    }
 
-		_is_writing = true;
+    void in_web_session::process_write_queue()
+    {
+        if (_write_queue.empty() || _is_closing || !_ws->is_open())
+        {
+            _is_writing = false;
+            return;
+        }
 
-		auto [tag, json, callback] = _write_queue.front();
+        _is_writing = true;
 
-		_write_queue.erase(_write_queue.begin());
+        auto [tag, json, callback] = _write_queue.front();
 
-		try
-		{
-			std::string message;
+        _write_queue.pop_front();
 
-			message.reserve(1 + json.length());
-			message.push_back(static_cast<char>(tag));
-			message.append(json);
+        try
+        {
+            str message;
 
-			main_player::core::debug::debug_system::log("web_session", "send: " + std::to_string(tag) + '/' + json);
+            message.reserve(1 + json.length());
+            message.push_back(static_cast<char>(tag));
+            message.append(json);
 
-			_ws->async_write(boost::asio::buffer(message), [this, callback](boost::beast::error_code ec, std::size_t)
-			{
-				std::lock_guard<std::mutex> lock(_write_mutex);
+            logger::log("web_session", "send: " + std::to_string(tag) + '/' + json);
 
-				if (ec)
-				{
-					main_player::core::debug::debug_system::error("web_session",
-					                                              "WebSocket write error: " + ec.message());
-					if (callback) callback(false);
-					close();
-					return;
-				}
+            _ws->async_write(boost::asio::buffer(message), [this, callback](boost::beast::error_code ec, s_t)
+            {
+                std::lock_guard<std::mutex> lock(_write_mutex);
 
-				if (callback) callback(true);
+                if (ec)
+                {
+                    logger::error("web_session",
+                                  "WebSocket write error: " + ec.message());
+                    if (callback) callback(false);
+                    close();
+                    return;
+                }
 
-				process_write_queue();
-			});
-		}
-		catch (const std::exception& e)
-		{
-			std::lock_guard<std::mutex> lock(_write_mutex);
-			main_player::core::debug::debug_system::error(
-				"session", "Send preparation error: " + std::string(e.what()));
-			if (callback) callback(false);
-			close();
-		}
-	}
+                if (callback) callback(true);
 
-	void in_web_session::send_internal(const std::uint8_t& tag, const std::string& json,
-	                                   std::function<void(bool)> callback)
-	{
-		if (!_ws->is_open() || _is_closing)
-		{
-			main_player::core::debug::debug_system::error("web_session", "Cannot send - WebSocket closed");
-			if (callback) callback(false);
-			return;
-		}
+                process_write_queue();
+            });
+        } catch (const std::exception &e)
+        {
+            logger::error("session", "Send preparation error: " + str(e.what()));
 
-		std::lock_guard<std::mutex> lock(_write_mutex);
-		_write_queue.emplace_back(tag, json, callback);
+            if (callback) callback(false);
+            close();
+        }
+    }
 
-		if (!_is_writing) process_write_queue();
-	}
+    void in_web_session::send_internal(const u8 &tag, const str &json, std::function<void(bool)> callback)
+    {
+        if (!_ws->is_open() || _is_closing)
+        {
+            logger::error("web_session", "Cannot send - WebSocket closed");
+            if (callback) callback(false);
+            return;
+        }
 
-	void in_web_session::close()
-	{
-		if (_is_closing.exchange(true)) return;
+        std::lock_guard<std::mutex> lock(_write_mutex);
+        _write_queue.emplace_back(tag, json, callback);
 
-		try
-		{
-			boost::beast::error_code ec;
-			if (_ws && _ws->is_open())
-			{
-				_ws->close(boost::beast::websocket::close_code::normal, ec);
-				if (ec)
-					main_player::core::debug::debug_system::error("web_session",
-					                                              "WebSocket close error: " + ec.message());
-			}
-		}
-		catch (const std::exception& e)
-		{
-			main_player::core::debug::debug_system::error("web_session",
-			                                              "Exception during close: " + std::string(e.what()));
-		}
+        if (!_is_writing) process_write_queue();
+    }
 
-		if (_close_callback)
-		{
-			main_player::core::debug::debug_system::log_green("web_session", "close callback");
+    void in_web_session::close()
+    {
+        if (_is_closing.exchange(true)) return;
 
-			_close_callback();
-		}
-		else main_player::core::debug::debug_system::error("web_session", "close callback null");
-	}
+        try
+        {
+            boost::beast::error_code ec;
+            if (_ws && _ws->is_open())
+            {
+                _ws->close(boost::beast::websocket::close_code::normal, ec);
+                if (ec)
+                    logger::error("web_session",
+                                  "WebSocket close error: " + ec.message());
+            }
+        }
+        catch (const std::exception &e)
+        {
+            logger::error("web_session",
+                          "Exception during close: " + str(e.what()));
+        }
 
-	//Public:
-	in_web_session::in_web_session(boost::asio::ip::tcp::socket* socket): _is_closing(false), _is_writing(false)
-	{
-		core::debug::debug_system::log("web_session", "in_web_session()");
+        std::function<void()> cb;
 
-		_ws = new boost::beast::websocket::stream<boost::asio::ip::tcp::socket>(std::move(*socket));
-		_buffer_size = 4096;
-		_event = new main_player::core::actions::hash_events_getter<std::uint8_t, const std::string&>();
-		_time_wait_ping = 0;
-		_is_run = true;
+        {
+            std::lock_guard<std::mutex> lock(_callback_mutex);
+            cb = _close_callback;
+        }
 
-		try
-		{
-			_ws->accept();
-			_ws->binary(true);
+        if (cb)
+        {
+            logger::log_green("web_session", "close callback");
+            cb();
+        }
+        else logger::error("web_session", "close callback null");
+    }
 
-			read_message();
+    //Public:
+    in_web_session::in_web_session(boost::asio::ip::tcp::socket *socket): _is_closing(false), _is_writing(false)
+    {
+        logger::log("web_session", "in_web_session()");
 
-			_event->add_listener(SESSION_PING, [this](const std::string&)
-			{
-				_time_wait_ping = 0;
+        _ws = new boost::beast::websocket::stream<boost::asio::ip::tcp::socket>(std::move(*socket));
+        _event = new main_player::core::actions::hash_events_getter<u8, const str &>();
+        _time_wait_ping = 0;
+        _is_run = true;
 
-				send(SESSION_PING, "");
-			});
-		}
-		catch (const std::exception& e)
-		{
-			std::cerr << "WebSocket accept error: " << e.what() << std::endl;
-			close();
-		}
-	}
+        try
+        {
+            _ws->accept();
+            _ws->binary(true);
+            _ws->read_message_max(10 * 1024 * 1024);
 
-	in_web_session::~in_web_session()
-	{
-		core::debug::debug_system::log("web_session", "~in_web_session()");
+            read_message();
 
-		if (_ws)
-		{
-			try
-			{
-				boost::beast::error_code ec;
-				if (_ws->is_open())
-				{
-					_ws->close(boost::beast::websocket::close_code::normal, ec);
-					if (ec) std::cerr << "WebSocket close error: " << ec.message() << std::endl;
-				}
-			}
-			catch (const std::exception& e)
-			{
-				std::cerr << "Exception during WebSocket close: " << e.what() << std::endl;
-			}
+            _event->add_listener(SESSION_PING, [this](const str &)
+            {
+                _time_wait_ping = 0;
 
-			delete _ws;
-			_ws = nullptr;
-		}
+                send(SESSION_PING, "");
+            });
+        } catch (const std::exception &e)
+        {
+            std::cerr << "WebSocket accept error: " << e.what() << std::endl;
+            close();
+        }
+    }
 
-		delete _event;
-	}
+    in_web_session::~in_web_session()
+    {
+        logger::log("web_session", "~in_web_session()");
 
-	void in_web_session::set_listener_close(const std::function<void()>& callback)
-	{
-		_close_callback = callback;
-	}
+        if (_ws)
+        {
+            try
+            {
+                boost::beast::error_code ec_cancel;
+                _ws->cancel(ec_cancel);
 
-	void in_web_session::add_listener(const std::uint8_t& tag, std::function<void(const std::string&)> func)
-	{
-		_event->add_listener(tag, func);
-	}
+                boost::beast::error_code ec;
+                if (_ws->is_open())
+                {
+                    _ws->close(boost::beast::websocket::close_code::normal, ec);
+                    if (ec) std::cerr << "WebSocket close error: " << ec.message() << std::endl;
+                }
+            } catch (const std::exception &e)
+            {
+                std::cerr << "Exception during WebSocket close: " << e.what() << std::endl;
+            }
 
-	void in_web_session::remove_listener(const std::uint8_t& tag)
-	{
-		_event->remove_listeners(tag);
-	}
+            delete _ws;
+            _ws = nullptr;
+        }
 
-	void in_web_session::send(const std::uint8_t& tag, const std::string& json)
-	{
-		send_internal(tag, json, nullptr);
-	}
+        delete _event;
+    }
 
-	void in_web_session::send(const std::uint8_t& tag, const std::string& json, std::function<void(bool)> on_send)
-	{
-		send_internal(tag, json, on_send);
-	}
+    void in_web_session::set_listener_close(const std::function<void()> &callback)
+    {
+        std::lock_guard<std::mutex> lock(_callback_mutex);
+        _close_callback = callback;
+    }
 
-	bool in_web_session::is_closed()
-	{
-		return !_is_run;
-	}
+    void in_web_session::add_listener(const u8 &tag, std::function<void(const str &)> func)
+    {
+        _event->add_listener(tag, func);
+    }
 
-	void in_web_session::tick(const float& delta)
-	{
-		if (!_is_run) return;
+    void in_web_session::remove_listener(const u8 &tag)
+    {
+        _event->remove_listeners(tag);
+    }
 
-		_time_wait_ping += delta;
+    void in_web_session::send(const u8 &tag, const str &json)
+    {
+        send_internal(tag, json, nullptr);
+    }
 
-		if (_time_wait_ping > _ping_pong)
-		{
-			_is_run = false;
+    void in_web_session::send(const u8 &tag, const str &json, std::function<void(bool)> on_send)
+    {
+        send_internal(tag, json, on_send);
+    }
 
-			close();
-		}
-	}
+    bool in_web_session::is_closed()
+    {
+        return !_is_run;
+    }
+
+    void in_web_session::tick(const float &delta)
+    {
+        if (!_is_run) return;
+
+        _time_wait_ping += delta;
+
+        if (_time_wait_ping > _ping_pong_timeout)
+        {
+            _is_run = false;
+
+            close();
+        }
+    }
 }

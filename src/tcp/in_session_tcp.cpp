@@ -9,270 +9,311 @@
 
 namespace main_player::logic::connection
 {
-	const int _MAX_PACKET_SIZE = 10 * 1024 * 1024;
+    using logger = main_player::core::debug::debug_system;
+    using str = std::string;
+    using u8 = std::uint8_t;
+    using u32 = std::uint32_t;
+    using s_t = std::size_t;
 
-	const float _ping_pong = 30;
+    const u32 _MAX_PACKET_SIZE = 10 * 1024 * 1024;
 
-	//Public:
-	in_session_tcp::in_session_tcp(boost::asio::ip::tcp::socket* socket): _is_closing(false), _data(nullptr),
-	                                                                      _time_wait_ping(0), _is_run(true)
-	{
-		_socket = new boost::asio::ip::tcp::socket(std::move(*socket));
-		_data_tag = new char[4];
-		_event = new main_player::core::actions::hash_events_getter<std::uint8_t, const std::string&>();
+    const float _ping_pong = 30;
 
-		read_length();
+    //Public:
+    in_session_tcp::in_session_tcp(boost::asio::ip::tcp::socket *socket): _is_closing(false), _data(nullptr),
+                                                                          _time_wait_ping(0), _is_run(true)
+    {
+        _socket = new boost::asio::ip::tcp::socket(std::move(*socket));
+        _data_tag = new char[4];
+        _event = new main_player::core::actions::hash_events_getter<u8, const str &>();
 
-		_event->add_listener(SESSION_PING, [this](const std::string&)
-		{
-			_time_wait_ping = 0;
+        read_length();
 
-			send(SESSION_PING, "");
-		});
-	}
+        _event->add_listener(SESSION_PING, [this](const str &)
+        {
+            _time_wait_ping = 0;
 
-	in_session_tcp::~in_session_tcp()
-	{
-		if (_socket)
-		{
-			try
-			{
-				boost::system::error_code ec;
-				if (_socket->is_open())
-				{
-					_socket->close(ec);
+            send(SESSION_PING, "");
+        });
+    }
 
-					if (ec) std::cerr << "destruct close error: " << ec.message() << std::endl;
-				}
-			}
-			catch (const std::exception& e)
-			{
-				std::cerr << "exception during close: " << e.what() << std::endl;
-			}
+    in_session_tcp::~in_session_tcp()
+    {
+        if (_socket)
+        {
+            try
+            {
+                boost::system::error_code ec;
+                if (_socket->is_open())
+                {
+                    _socket->close(ec);
 
-			delete _socket;
-		}
+                    if (ec) std::cerr << "destruct close error: " << ec.message() << std::endl;
+                }
+            } catch (const std::exception &e)
+            {
+                std::cerr << "exception during close: " << e.what() << std::endl;
+            }
 
-		delete _event;
-		delete[] _data_tag;
-	}
+            delete _socket;
+        }
 
-	//Private:
-	void in_session_tcp::read_length()
-	{
-		if (!_socket->is_open())
-		{
-			close();
-			return;
-		}
+        delete _event;
+        delete[] _data_tag;
+        delete[] _data;
+        _data = nullptr;
+    }
 
-		async_read(*_socket, boost::asio::buffer(_data_tag, 4),
-		           [this](boost::system::error_code ec, std::size_t length) -> void
-		           {
-			           if (ec)
-			           {
-				           if (ec != boost::asio::error::operation_aborted)
-					           main_player::core::debug::debug_system::error("tcp_session",
-					                                                         "socket read length failed: " + ec.
-					                                                         message());
+    //Private:
+    void in_session_tcp::read_length()
+    {
+        if (!_socket->is_open())
+        {
+            close();
+            return;
+        }
 
-				           close();
-				           return;
-			           }
+        async_read(*_socket, boost::asio::buffer(_data_tag, 4),
+                   [this](boost::system::error_code ec, s_t length) -> void
+                   {
+                       try
+                       {
+                           if (ec)
+                           {
+                               if (ec != boost::asio::error::operation_aborted)
+                                   logger::error("tcp_session",
+                                                 "socket read length failed: " + ec.
+                                                 message());
 
-			           if (length != 4)
-			           {
-				           main_player::core::debug::debug_system::error("tcp_session",
-				                                                         "invalid length header size: " +
-				                                                         std::to_string(length));
-				           close();
-				           return;
-			           }
+                               close();
+                               return;
+                           }
 
-			           int packet_length = 0;
-			           memcpy(&packet_length, _data_tag, 4);
+                           if (length != 4)
+                           {
+                               logger::error("tcp_session",
+                                             "invalid length header size: " +
+                                             std::to_string(length));
+                               close();
+                               return;
+                           }
 
-			           if (packet_length < 1 || packet_length > _MAX_PACKET_SIZE)
-			           {
-				           main_player::core::debug::debug_system::error("tcp_session",
-				                                                         "invalid packet length: " + std::to_string(
-					                                                         packet_length));
-				           return;
-			           }
+                           u32 packet_length = 0;
+                           memcpy(&packet_length, _data_tag, 4);
 
-			           read_data(packet_length);
-		           });
-	}
+                           if (packet_length == 0 || packet_length > _MAX_PACKET_SIZE)
+                           {
+                               logger::error("tcp_session",
+                                             "invalid packet length: " + std::to_string(
+                                                 packet_length));
+                               close();
+                               return;
+                           }
 
-	void in_session_tcp::read_data(int length)
-	{
-		_data = new char[length];
-		async_read(*_socket, boost::asio::buffer(_data, length),
-		           [this, length](boost::system::error_code ec, std::size_t bytes_read) -> void
-		           {
-			           if (ec)
-			           {
-				           main_player::core::debug::debug_system::error(
-					           "tcp_session", "read data failed: " + ec.message());
+                           read_data(packet_length);
+                       } catch (const std::exception &e)
+                       {
+                           logger::error("tcp_session",
+                                         "read_length exception: " + str(e.what()));
+                           close();
+                       }
+                   });
+    }
 
-				           delete[] _data;
+    void in_session_tcp::read_data(u32 length)
+    {
+        _data = new char[length];
+        async_read(*_socket, boost::asio::buffer(_data, length),
+                   [this, length](boost::system::error_code ec, s_t bytes_read) -> void
+                   {
+                       if (ec)
+                       {
+                           logger::error(
+                               "tcp_session", "read data failed: " + ec.message());
 
-				           close();
-				           return;
-			           }
+                           delete[] _data;
+                           _data = nullptr;
 
-			           if (bytes_read != static_cast<std::size_t>(length))
-			           {
-				           std::string log = "size: " + std::to_string(length) + ", read size: " + std::to_string(bytes_read);
+                           close();
+                           return;
+                       }
 
-				           main_player::core::debug::debug_system::error("tcp_session", "incomplete data read. " + log);
+                       if (bytes_read != static_cast<s_t>(length))
+                       {
+                           str log = "size: " + std::to_string(length) + ", read size: " + std::to_string(bytes_read);
 
-				           delete[] _data;
+                           logger::error("tcp_session", "incomplete data read. " + log);
 
-				           close();
-				           return;
-			           }
+                           delete[] _data;
+                           _data = nullptr;
 
-			           std::uint8_t tag = _data[0];
-			           int data_length = length - 1;
+                           close();
+                           return;
+                       }
 
-			           std::string json_data(_data + 1, data_length);
-			           std::string log = "read: " + std::to_string(tag) + '/' + json_data;
+                       u8 tag = _data[0];
+                       int data_length = static_cast<int>(length - 1);
 
-			           delete[] _data;
+                       str json_data(_data + 1, data_length);
 
-			           main_player::core::debug::debug_system::log("tcp_session", log);
+                       delete[] _data;
+                       _data = nullptr;
 
-			           _event->invoke(tag, json_data);
+                       logger::log("tcp_session", "read: " + std::to_string(tag));
+
+                       _event->invoke(tag, json_data);
 
 
-			           read_length();
-		           });
-	}
+                       read_length();
+                   });
+    }
 
-	void in_session_tcp::send_internal(const std::uint8_t& tag, const std::string& json,
-	                                   const std::function<void(boost::system::error_code, std::size_t)>& callback
-	)
-	{
-		std::lock_guard<std::mutex> lock(_socket_mutex);
-		if (!_socket->is_open())
-		{
-			if (callback) callback(boost::asio::error::not_connected, 0);
+    void in_session_tcp::send_internal(const u8 &tag, const str &json,
+                                       const std::function<void(boost::system::error_code, s_t)> &callback
+    )
+    {
+        std::lock_guard<std::mutex> lock(_socket_mutex);
+        if (!_socket->is_open())
+        {
+            if (callback) callback(boost::asio::error::not_connected, 0);
 
-			close();
-			return;
-		}
+            close();
+            return;
+        }
 
-		std::uint32_t data_length = json.length();
-		std::uint32_t total_length = data_length + 1;
+        _write_queue.emplace_back(tag, json, callback);
 
-		char length_buffer[4];
-		memcpy(length_buffer, &total_length, 4);
+        if (!_is_writing)
+        {
+            process_write_queue();
+        }
+    }
 
-		std::uint8_t tag_buffer[1]{tag};
+    void in_session_tcp::process_write_queue()
+    {
+        if (_write_queue.empty())
+        {
+            _is_writing = false;
+            return;
+        }
 
-		std::vector<boost::asio::const_buffer> buffers;
+        _is_writing = true;
 
-		buffers.push_back(boost::asio::buffer(length_buffer, 4));
-		buffers.push_back(boost::asio::buffer(tag_buffer, 1));
-		buffers.push_back(boost::asio::buffer(json.data(), data_length));
+        auto [tag, json_str, callback] = std::move(_write_queue.front());
+        _write_queue.erase(_write_queue.begin());
 
-		std::string log = "send: " + std::to_string(tag) + '/' + json;
+        u32 data_length = json_str.length();
+        u32 total_length = data_length + 1;
 
-		main_player::core::debug::debug_system::log("tcp_session", log);
+        auto packet = new str();
+        packet->reserve(4 + 1 + data_length);
+        packet->append(reinterpret_cast<char *>(&total_length), 4);
+        packet->push_back(static_cast<char>(tag));
+        packet->append(json_str);
 
-		async_write(*_socket, buffers, callback);
-	}
+        logger::log("tcp_session", "send: " + std::to_string(tag));
 
-	void in_session_tcp::close()
-	{
-		if (_is_closing.exchange(true)) return;
+        async_write(*_socket, boost::asio::buffer(*packet),
+                    [this, callback, packet](boost::system::error_code ec, s_t bytes_transferred)
+                    {
+                        if (callback) callback(ec, bytes_transferred);
+                        delete packet;
 
-		boost::system::error_code ec;
-		std::lock_guard<std::mutex> lock(_socket_mutex);
+                        std::lock_guard<std::mutex> lock(_socket_mutex);
+                        process_write_queue();
+                    });
+    }
 
-		if (_socket && _socket->is_open())
-		{
-			_socket->close(ec);
+    void in_session_tcp::close()
+    {
+        if (_is_closing.exchange(true)) return;
 
-			if (ec) main_player::core::debug::debug_system::error("tcp_session", "close error: " + ec.message());
-		}
+        boost::system::error_code ec_cancel;
+        boost::system::error_code ec_close;
+        std::lock_guard<std::mutex> lock(_socket_mutex);
 
-		if (_close_callback)
-		{
-			main_player::core::debug::debug_system::log_green("tcp_session", "close callback");
+        if (_socket && _socket->is_open())
+        {
+            _socket->cancel(ec_cancel);
+            _socket->close(ec_close);
 
-			_close_callback();
-		}
-		else main_player::core::debug::debug_system::error("tcp_session", "close callback null");
-	}
+            if (ec_close) logger::error("tcp_session", "close error: " + ec_close.message());
+        }
 
-	//Public:
-	void in_session_tcp::set_listener_close(const std::function<void()>& callback)
-	{
-		_close_callback = callback;
-	}
+        if (_close_callback)
+        {
+            logger::log_green("tcp_session", "close callback");
 
-	void in_session_tcp::remove_listener(const std::uint8_t& tag)
-	{
-		_event->remove_listeners(tag);
-	}
+            _close_callback();
+        } else logger::error("tcp_session", "close callback null");
+    }
 
-	void in_session_tcp::add_listener(const std::uint8_t& tag, std::function<void(const std::string&)> func)
-	{
-		_event->add_listener(tag, func);
-	}
+    //Public:
+    void in_session_tcp::set_listener_close(const std::function<void()> &callback)
+    {
+        _close_callback = callback;
+    }
 
-	void in_session_tcp::send(const std::uint8_t& tag, const std::string& json)
-	{
-		auto callback = [this](boost::system::error_code ec, std::size_t) -> void
-		{
-			if (ec)
-			{
-				main_player::core::debug::debug_system::error("tcp_session",
-				                                              "error writing to socket: " + ec.message());
-				close();
-			}
-		};
+    void in_session_tcp::remove_listener(const u8 &tag)
+    {
+        _event->remove_listeners(tag);
+    }
 
-		send_internal(tag, json, callback);
-	}
+    void in_session_tcp::add_listener(const u8 &tag, std::function<void(const str &)> func)
+    {
+        _event->add_listener(tag, func);
+    }
 
-	void in_session_tcp::send(const std::uint8_t& tag, const std::string& json, std::function<void(bool)> on_send)
-	{
-		auto cachedCallback = std::move(on_send);
-		auto callbackWrite = [this, cachedCallback](boost::system::error_code ec, std::size_t) -> void
-		{
-			if (!ec)
-			{
-				if (cachedCallback) cachedCallback(true);
-				return;
-			}
+    void in_session_tcp::send(const u8 &tag, const str &json)
+    {
+        auto callback = [this](boost::system::error_code ec, s_t) -> void
+        {
+            if (ec)
+            {
+                logger::error("tcp_session",
+                              "error writing to socket: " + ec.message());
+                close();
+            }
+        };
 
-			main_player::core::debug::debug_system::error("tcp_session", "error writing to socket: " + ec.message());
-			if (cachedCallback) cachedCallback(false);
-			close();
-		};
+        send_internal(tag, json, callback);
+    }
 
-		send_internal(tag, json, callbackWrite);
-	}
+    void in_session_tcp::send(const u8 &tag, const str &json, std::function<void(bool)> on_send)
+    {
+        auto cachedCallback = std::move(on_send);
+        auto callbackWrite = [this, cachedCallback](boost::system::error_code ec, s_t) -> void
+        {
+            if (!ec)
+            {
+                if (cachedCallback) cachedCallback(true);
+                return;
+            }
 
-	bool in_session_tcp::is_closed()
-	{
-		return !_is_run;
-	}
+            logger::error("tcp_session", "error writing to socket: " + ec.message());
+            if (cachedCallback) cachedCallback(false);
+            close();
+        };
 
-	void in_session_tcp::tick(const float& delta)
-	{
-		if (!_is_run) return;
+        send_internal(tag, json, callbackWrite);
+    }
 
-		_time_wait_ping += delta;
+    bool in_session_tcp::is_closed()
+    {
+        return !_is_run;
+    }
 
-		if (_time_wait_ping > _ping_pong)
-		{
-			_is_run = false;
+    void in_session_tcp::tick(const float &delta)
+    {
+        if (!_is_run) return;
 
-			close();
-		}
-	}
+        _time_wait_ping += delta;
+
+        if (_time_wait_ping > _ping_pong)
+        {
+            _is_run = false;
+
+            close();
+        }
+    }
 }
