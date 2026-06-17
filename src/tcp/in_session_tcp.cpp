@@ -9,6 +9,7 @@
 
 namespace main_player::logic::connection
 {
+    using tcp = boost::asio::ip::tcp;
     using logger = main_player::core::debug::debug_system;
     using str = std::string;
     using u8 = std::uint8_t;
@@ -20,10 +21,10 @@ namespace main_player::logic::connection
     const float _ping_pong = 30;
 
     //Public:
-    in_session_tcp::in_session_tcp(boost::asio::ip::tcp::socket *socket): _is_closing(false), _data(nullptr),
+    in_session_tcp::in_session_tcp(tcp::socket *socket): _is_closing(false), _data(nullptr),
                                                                           _time_wait_ping(0), _is_run(true)
     {
-        _socket = new boost::asio::ip::tcp::socket(std::move(*socket));
+        _socket = new tcp::socket(std::move(*socket));
         _data_tag = new char[4];
         _event = new main_player::core::actions::hash_events_getter<u8, const str &>();
 
@@ -50,7 +51,8 @@ namespace main_player::logic::connection
 
                     if (ec) std::cerr << "destruct close error: " << ec.message() << std::endl;
                 }
-            } catch (const std::exception &e)
+            }
+            catch (const std::exception &e)
             {
                 std::cerr << "exception during close: " << e.what() << std::endl;
             }
@@ -81,9 +83,7 @@ namespace main_player::logic::connection
                            if (ec)
                            {
                                if (ec != boost::asio::error::operation_aborted)
-                                   logger::error("tcp_session",
-                                                 "socket read length failed: " + ec.
-                                                 message());
+                                   logger::error("tcp_session", "socket read length failed: " + ec.message());
 
                                close();
                                return;
@@ -91,9 +91,7 @@ namespace main_player::logic::connection
 
                            if (length != 4)
                            {
-                               logger::error("tcp_session",
-                                             "invalid length header size: " +
-                                             std::to_string(length));
+                               logger::error("tcp_session", "invalid length header size: " + std::to_string(length));
                                close();
                                return;
                            }
@@ -103,18 +101,16 @@ namespace main_player::logic::connection
 
                            if (packet_length == 0 || packet_length > _MAX_PACKET_SIZE)
                            {
-                               logger::error("tcp_session",
-                                             "invalid packet length: " + std::to_string(
-                                                 packet_length));
+                               logger::error("tcp_session", "invalid packet length: " + std::to_string(packet_length));
                                close();
                                return;
                            }
 
                            read_data(packet_length);
-                       } catch (const std::exception &e)
+                       }
+                       catch (const std::exception &e)
                        {
-                           logger::error("tcp_session",
-                                         "read_length exception: " + str(e.what()));
+                           logger::error("tcp_session", "read_length exception: " + str(e.what()));
                            close();
                        }
                    });
@@ -123,13 +119,13 @@ namespace main_player::logic::connection
     void in_session_tcp::read_data(u32 length)
     {
         _data = new char[length];
+
         async_read(*_socket, boost::asio::buffer(_data, length),
                    [this, length](boost::system::error_code ec, s_t bytes_read) -> void
                    {
                        if (ec)
                        {
-                           logger::error(
-                               "tcp_session", "read data failed: " + ec.message());
+                           logger::error("tcp_session", "read data failed: " + ec.message());
 
                            delete[] _data;
                            _data = nullptr;
@@ -168,8 +164,7 @@ namespace main_player::logic::connection
                    });
     }
 
-    void in_session_tcp::send_internal(const u8 &tag, const str &json,
-                                       const std::function<void(boost::system::error_code, s_t)> &callback
+    void in_session_tcp::send_internal(const u8 &tag, const str &json, const std::function<void(boost::system::error_code, s_t)> &callback
     )
     {
         std::lock_guard<std::mutex> lock(_socket_mutex);
@@ -183,10 +178,7 @@ namespace main_player::logic::connection
 
         _write_queue.emplace_back(tag, json, callback);
 
-        if (!_is_writing)
-        {
-            process_write_queue();
-        }
+        if (!_is_writing) process_write_queue();
     }
 
     void in_session_tcp::process_write_queue()
@@ -200,12 +192,14 @@ namespace main_player::logic::connection
         _is_writing = true;
 
         auto [tag, json_str, callback] = std::move(_write_queue.front());
+
         _write_queue.erase(_write_queue.begin());
 
         u32 data_length = json_str.length();
         u32 total_length = data_length + 1;
 
         auto packet = new str();
+
         packet->reserve(4 + 1 + data_length);
         packet->append(reinterpret_cast<char *>(&total_length), 4);
         packet->push_back(static_cast<char>(tag));
@@ -245,7 +239,8 @@ namespace main_player::logic::connection
             logger::log_green("tcp_session", "close callback");
 
             _close_callback();
-        } else logger::error("tcp_session", "close callback null");
+        }
+        else logger::error("tcp_session", "close callback null");
     }
 
     //Public:
@@ -270,8 +265,7 @@ namespace main_player::logic::connection
         {
             if (ec)
             {
-                logger::error("tcp_session",
-                              "error writing to socket: " + ec.message());
+                logger::error("tcp_session", "error writing to socket: " + ec.message());
                 close();
             }
         };

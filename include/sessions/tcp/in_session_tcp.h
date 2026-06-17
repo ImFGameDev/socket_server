@@ -21,7 +21,6 @@ namespace main_player::logic::connection
 		std::atomic<float> _time_wait_ping;
 		char* _data_tag;
 		char* _data;
-
 		std::vector<std::tuple<std::uint8_t, std::string, std::function<void(boost::system::error_code, std::size_t)>>> _write_queue;
 		bool _is_writing = false;
 

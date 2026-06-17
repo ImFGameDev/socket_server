@@ -25,8 +25,7 @@ namespace main_player::server::http
 		void process_request();
 
 		boost::beast::http::response<boost::beast::http::string_body> create_response(
-			boost::beast::http::status status, const std::string& body
-		);
+			boost::beast::http::status status, const std::string& body);
 
 		void send_response(boost::beast::http::response<boost::beast::http::string_body>&& response);
 

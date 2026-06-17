@@ -30,7 +30,7 @@ namespace main_player::logic::connection
             if (ec)
             {
                 if (ec != boost::beast::websocket::error::closed)
-                    logger::error("web_session", "WebSocket read failed: " + ec.message());
+                    logger::error("web_session", "web socket read failed: " + ec.message());
 
                 close();
                 return;
@@ -43,7 +43,7 @@ namespace main_player::logic::connection
 
                 if (message.length() < 1)
                 {
-                    logger::error("web_session", "Empty WebSocket message");
+                    logger::error("web_session", "empty web socket message");
                     close();
                     return;
                 }
@@ -57,10 +57,10 @@ namespace main_player::logic::connection
                 _event->invoke(tag, json_data);
 
                 read_message();
-            } catch (const std::exception &e)
+            }
+            catch (const std::exception &e)
             {
-                logger::error("web_session",
-                              "Message processing error: " + str(e.what()));
+                logger::error("web_session", "message processing error: " + str(e.what()));
                 close();
             }
         });
@@ -96,8 +96,7 @@ namespace main_player::logic::connection
 
                 if (ec)
                 {
-                    logger::error("web_session",
-                                  "WebSocket write error: " + ec.message());
+                    logger::error("web_session", "web socket write error: " + ec.message());
                     if (callback) callback(false);
                     close();
                     return;
@@ -107,9 +106,10 @@ namespace main_player::logic::connection
 
                 process_write_queue();
             });
-        } catch (const std::exception &e)
+        }
+        catch (const std::exception &e)
         {
-            logger::error("session", "Send preparation error: " + str(e.what()));
+            logger::error("session", "send preparation error: " + str(e.what()));
 
             if (callback) callback(false);
             close();
@@ -120,7 +120,7 @@ namespace main_player::logic::connection
     {
         if (!_ws->is_open() || _is_closing)
         {
-            logger::error("web_session", "Cannot send - WebSocket closed");
+            logger::error("web_session", "cannot send - web socket closed");
             if (callback) callback(false);
             return;
         }
@@ -141,15 +141,13 @@ namespace main_player::logic::connection
             if (_ws && _ws->is_open())
             {
                 _ws->close(boost::beast::websocket::close_code::normal, ec);
-                if (ec)
-                    logger::error("web_session",
-                                  "WebSocket close error: " + ec.message());
+
+                if (ec) logger::error("web_session", "WebSocket close error: " + ec.message());
             }
         }
         catch (const std::exception &e)
         {
-            logger::error("web_session",
-                          "Exception during close: " + str(e.what()));
+            logger::error("web_session", "exception during close: " + str(e.what()));
         }
 
         std::function<void()> cb;
@@ -161,7 +159,7 @@ namespace main_player::logic::connection
 
         if (cb)
         {
-            logger::log_green("web_session", "close callback");
+            logger::log("web_session", "close callback");
             cb();
         }
         else logger::error("web_session", "close callback null");
@@ -170,8 +168,6 @@ namespace main_player::logic::connection
     //Public:
     in_web_session::in_web_session(boost::asio::ip::tcp::socket *socket): _is_closing(false), _is_writing(false)
     {
-        logger::log("web_session", "in_web_session()");
-
         _ws = new boost::beast::websocket::stream<boost::asio::ip::tcp::socket>(std::move(*socket));
         _event = new main_player::core::actions::hash_events_getter<u8, const str &>();
         _time_wait_ping = 0;
@@ -191,17 +187,16 @@ namespace main_player::logic::connection
 
                 send(SESSION_PING, "");
             });
-        } catch (const std::exception &e)
+        }
+        catch (const std::exception &e)
         {
-            std::cerr << "WebSocket accept error: " << e.what() << std::endl;
+            logger::error("web_session", "accept error: " + str(e.what()));
             close();
         }
     }
 
     in_web_session::~in_web_session()
     {
-        logger::log("web_session", "~in_web_session()");
-
         if (_ws)
         {
             try
@@ -213,11 +208,13 @@ namespace main_player::logic::connection
                 if (_ws->is_open())
                 {
                     _ws->close(boost::beast::websocket::close_code::normal, ec);
-                    if (ec) std::cerr << "WebSocket close error: " << ec.message() << std::endl;
+
+                    if (ec) logger::error("web_session", "close error: " + str(ec.message()));
                 }
-            } catch (const std::exception &e)
+            }
+            catch (const std::exception &e)
             {
-                std::cerr << "Exception during WebSocket close: " << e.what() << std::endl;
+                logger::error("web_session", "exception during web socket close: " + str(e.what()));
             }
 
             delete _ws;

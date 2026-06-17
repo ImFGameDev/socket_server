@@ -81,8 +81,7 @@ namespace main_player::server::http
 		{
 			logger::error("session_get", "GET error: " + str(e.what()));
 
-			send_response(create_response(boost::beast::http::status::bad_request,
-			                              "Error processing GET request: " + str(e.what())));
+			send_response(create_response(boost::beast::http::status::bad_request, "Error processing GET request: " + str(e.what())));
 		}
 	}
 

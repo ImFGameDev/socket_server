@@ -53,7 +53,7 @@ namespace main_player::server::http
 			return;
 		}
 
-		std::cout << "Received " << _req->method_string() << " " << _req->target() << std::endl;
+		logger::log("session_post", "received: " + str(_req->method_string()) + " " + str(_req->target()));
 
 		try
 		{
@@ -72,7 +72,7 @@ namespace main_player::server::http
 		catch(const std::exception& e)
 		{
 			logger::error("session_post", "POST error: " + str(e.what()));
-			send_response(create_response(boost::beast::http::status::bad_request, "Error processing request"));
+			send_response(create_response(boost::beast::http::status::bad_request, "error processing request"));
 		}
 	}
 
